@@ -34,8 +34,8 @@ class Installer:
         *, 
         source_dir: str, 
         source_root: str, 
-        install_script_name,
         backup_strategy: 'BackupStrategy',
+        install_script_name: str = 'install',
     ):
         self.source_dir = source_dir
         self.source_root = source_root
@@ -67,15 +67,16 @@ class Installer:
 
         for (dir, fname) in walk_files(self.source_root_dir):
             fname = render(fname, config)
-            fname_dest_dir = os.path.join(dest_dir, dir)
+            fname_source = os.path.join(dir, fname)
+            fname_dest_dir = os.path.join(dest_dir, os.path.relpath(dir,self.source_root_dir))
             fname_dest = os.path.join(fname_dest_dir, fname)
             if not os.path.exists(fname_dest_dir):
                 make_dir(fname_dest_dir, deep=True)
             if not os.path.exists(fname_dest):
-                copy_file(fname, fname_dest)
+                copy_file(fname_source, fname_dest)
             else:
                 with temp_file_name(os.path.basename(fname)) as fname_tmp:
-                    render_file(fname, config, fname_tmp)
+                    render_file(fname_source, config, fname_tmp)
                     merge_file(fname_dest, fname_tmp, backup_strategy=self.backup_strategy)
 
     def find_install_script(self) -> str | None:
@@ -158,7 +159,7 @@ class TextMerger:
         return lines
 
     def merge(self, l0: list[str], l1: list[str], strategy: Strategy) -> list[str]:
-        return l0 + l1
+        return l0 + [''] + l1   # blank line between
 
     def dump(self, lines: list[str], fname: str) -> None:
         with open(fname,'w') as f:
@@ -194,10 +195,10 @@ def merge_file(
     backup_strategy: BackupStrategy = BackupStrategy.ERROR,
 ):
     try:
-        ftype = next(k for k in FILETYPE_MERGER if fnmatch(k,fname_old))
+        ftype = next(k for k in FILETYPE_MERGER if fnmatch(k,os.path.basename(fname_old)))
     except StopIteration:
         if os.path.exists(fname_old):
-            _handle_conflict(fname_new, fname_old, backup_strategy)
+            _handle_conflict(fname_old, fname_new, backup_strategy)
         else:
             copy_file(fname_new, fname_old)
     else:
@@ -205,7 +206,7 @@ def merge_file(
         data_old = merger.load(fname_old)
         data_new = merger.load(fname_new)
         data_merged = merger.merge(data_old, data_new, strategy=merge_strategy)
-        merger.dump(fname_old, data_merged)
+        merger.dump(data_merged, fname_old)
 
 def _handle_conflict(fname_old: str, fname_new: str, strategy: BackupStrategy):
     if strategy == BackupStrategy.ERROR:
