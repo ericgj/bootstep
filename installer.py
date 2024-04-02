@@ -33,8 +33,8 @@ class Installer:
         self, 
         *, 
         source_dir: str, 
-        source_root: str, 
         backup_strategy: 'BackupStrategy',
+        source_root: str = 'root', 
         install_script_name: str = 'install',
     ):
         self.source_dir = source_dir
@@ -66,25 +66,30 @@ class Installer:
             render_and_execute_script(script, config, dest_dir)
 
         for (dir, fname) in walk_files(self.source_root_dir):
-            fname = render(fname, config)
             fname_source = os.path.join(dir, fname)
-            fname_dest_dir = os.path.join(dest_dir, os.path.relpath(dir,self.source_root_dir))
-            fname_dest = os.path.join(fname_dest_dir, fname)
-            if not os.path.exists(fname_dest_dir):
-                make_dir(fname_dest_dir, deep=True)
-            if not os.path.exists(fname_dest):
-                copy_file(fname_source, fname_dest)
-            else:
-                with temp_file_name(os.path.basename(fname)) as fname_tmp:
-                    render_file(fname_source, config, fname_tmp)
-                    merge_file(fname_dest, fname_tmp, backup_strategy=self.backup_strategy)
+            dir_rendered = render(dir, config)
+            fname_rendered = render(fname, config)
+            fname_dest_dir = os.path.join(dest_dir, os.path.relpath(dir_rendered,self.source_root_dir))
+            fname_dest = os.path.join(fname_dest_dir, fname_rendered)
+            with temp_file_name(os.path.basename(fname_rendered)) as fname_tmp:
+                size = render_file(fname_source, config, fname_tmp)
+                if size == 0:
+                    continue  # TODO log skipping file
+                else:
+                    if not os.path.exists(fname_dest_dir):
+                        make_dir(fname_dest_dir, deep=True)
+                    if not os.path.exists(fname_dest):
+                        copy_file(fname_tmp, fname_dest)
+                    else:
+                        merge_file(fname_dest, fname_tmp, backup_strategy=self.backup_strategy)
 
     def find_install_script(self) -> str | None:
         sysname = platform.system()
         empty_list: list[str] = []
         try:
             return next(
-                fname for fname in find_glob(self.install_script_name + ".*", root_dir=self.source_dir)
+                os.path.join(self.source_dir, fname) 
+                    for fname in find_glob(self.install_script_name + ".*", root_dir=self.source_dir)
                     if os.path.splitext(fname)[1].lower() in INSTALL_SYS_EXT.get(sysname,empty_list) 
             )
         except StopIteration:
@@ -107,10 +112,13 @@ import ustache
 
 render = ustache.render
 
-def render_file(source_file: str, data: dict[str,Any], dest_file: str):
+def render_file(source_file: str, data: dict[str,Any], dest_file: str) -> int:
     with open(source_file,'r') as src, open(dest_file,'w') as dst:
         tmpl = src.read()
-        dst.write(render(tmpl, data))
+        s = render(tmpl, data).strip()
+        dst.write(s)
+        dst.write('\n')
+        return len(s)
 
 
 
@@ -345,7 +353,7 @@ def temp_file_name(fname: str) -> Generator[str,None,None]:
        yield os.path.join(tmpdir, fname)
 
 def make_executable(fname: str) -> None:
-    os.chmod(fname, stat.S_IXUSR)
+    os.chmod(fname, stat.S_IRUSR | stat.S_IXUSR)
 
 find_glob = glob.iglob
 

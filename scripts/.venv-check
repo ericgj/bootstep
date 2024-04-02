@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+
+# Shortcut to activate the check virtualenv.
+# Usage: . scripts/.venv-check
+
+. .venv-check/bin/activate
