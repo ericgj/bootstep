@@ -20,11 +20,11 @@ from ..adapter.merge import merge_file, ConflictStrategy
 """
 
 
-INSTALL_SYS_EXT: dict[str, set[str]] = {
-    "Windows": {".cmd", ".bat", ".ps"},
-    "Linux": {".sh", ".bash", ""},
-    "Darwin": {".sh", ".bash", ""},
-    "Java": {".jar"},
+INSTALL_SYS_EXT: dict[str, list[str]] = {
+    "Windows": [".cmd", ".bat", ".ps", ".py"],
+    "Linux": [".sh", ".bash", "", ".py"],
+    "Darwin": [".sh", ".bash", "", ".py"],
+    "Java": [".jar", ".py"],
 }
 
 
@@ -61,25 +61,29 @@ class Installer:
             "conflict_strategy": self.conflict_strategy.value,
         }
 
+    def meta(self) -> dict[str, Any]:
+        return {"__install__": self.to_dict()}
+
     def install(self, config: dict[str, Any], dest_dir: str = ".") -> None:
         """Install from pre-rendered config"""
-        config = cast(dict[str, Any], merge({}, config, {"installer": self.to_dict()}))
+        meta = self.meta()
+        scopes = [meta]
 
         if self.run_install_scripts:
             script = self.find_install_script()
             if script:
-                render_and_execute_script(script, config, dest_dir)
+                render_and_execute_script(script, config, dest_dir, scopes=scopes)
 
         for dir, fname in walk_files(self.source_root_dir):
             fname_source = os.path.join(dir, fname)
-            dir_rendered = render(dir, config)
-            fname_rendered = render(fname, config)
+            dir_rendered = render(dir, config, scopes=scopes)
+            fname_rendered = render(fname, config, scopes=scopes)
             fname_dest_dir = os.path.join(
                 dest_dir, os.path.relpath(dir_rendered, self.source_root_dir)
             )
             fname_dest = os.path.join(fname_dest_dir, fname_rendered)
             with temp_file_name(os.path.basename(fname_rendered)) as fname_tmp:
-                size = render_file(fname_source, config, fname_tmp)
+                size = render_file(fname_source, config, fname_tmp, scopes=scopes)
                 if size == 0:
                     continue  # TODO log skipping file
                 else:
@@ -97,7 +101,7 @@ class Installer:
         if self.run_install_scripts:
             post_script = self.find_post_install_script()
             if post_script:
-                render_and_execute_script(post_script, config, dest_dir)
+                render_and_execute_script(post_script, config, dest_dir, scopes=scopes)
 
     def find_install_script(self) -> str | None:
         return find_script_by_platform(self.source_dir, self.install_script)
@@ -108,35 +112,37 @@ class Installer:
 
 def find_script_by_platform(source_dir: str, script_name: str) -> str | None:
     sysname = platform.system()
-    empty_list: list[str] = []
     try:
         return next(
-            os.path.join(source_dir, fname)
-            for fname in find_glob(script_name + ".*", root_dir=source_dir)
-            if os.path.splitext(fname)[1].lower()
-            in INSTALL_SYS_EXT.get(sysname, empty_list)
+            fname
+            for ext in INSTALL_SYS_EXT.get(sysname, [".py"])
+            if os.path.exists(fname := os.path.join(source_dir, script_name + ext))
         )
     except StopIteration:
         return None
 
 
 def render_and_execute_script(
-    script_file: str, config: dict[str, Any], cwd: str
+    script_file: str,
+    config: dict[str, Any],
+    cwd: str,
+    *,
+    scopes: list[dict[str, Any]] = [],
 ) -> None:
+    ext = os.path.splitext(script_file)[1]
     with temp_file_name(os.path.basename(script_file)) as tmp_file:
-        render_file(script_file, config, tmp_file)
-        make_executable(tmp_file)
-        run_with_output([tmp_file], cwd=cwd)
+        render_file(script_file, config, tmp_file, scopes=scopes)
+        if ext == ".py":
+            run_with_output(["python", tmp_file], cwd=cwd)
+        else:
+            make_executable(tmp_file)
+            run_with_output([tmp_file], cwd=cwd)
 
 
 # in adapter.template
-from collections.abc import Sequence
+from collections.abc import Sequence, Iterable
 import ustache
 from typing import AnyStr  # , Any
-
-
-def render(template: str, scope: dict[str, Any]) -> str:
-    return ustache.render(template, scope, getter=_safe_render_getter)
 
 
 class _KEY_MISSING:
@@ -176,11 +182,31 @@ def _safe_render_getter(
     return v
 
 
-def render_file(source_file: str, data: dict[str, Any], dest_file: str) -> int:
+def _no_escape(data: bytes) -> bytes:
+    return data
+
+
+def render(template: str, scope: Any, *, scopes: Iterable[Any]) -> str:
+    return ustache.render(
+        template,
+        scope,
+        scopes=scopes,
+        getter=_safe_render_getter,
+        escape=_no_escape,
+    )
+
+
+def render_file(
+    source_file: str,
+    scope: Any,
+    dest_file: str,
+    *,
+    scopes: Iterable[Any] = [],
+) -> int:
     with open(source_file, "r") as src, open(dest_file, "w") as dst:
         tmpl = src.read()
         try:
-            s = render(tmpl, data).strip()
+            s = render(tmpl, scope, scopes=scopes).strip()
         except KeyError as e:
             raise TemplateKeyError(e.args[0], source_file, dest_file)
         dst.write(s)

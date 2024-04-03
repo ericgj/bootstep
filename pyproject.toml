@@ -1,3 +1,50 @@
+[build-system]
+requires = [
+    "setuptools",
+    "setuptools-scm",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bootstep"
+authors = [
+    { name = "Eric Gjertsen", email = "ericgj72@gmail.com" },
+]
+description = "Bootrapping your project, step by step"
+readme = "README"
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 1 - Planning",
+    "Environment :: Console",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Build Tools",
+]
+dependencies = [
+    "ustache",
+    "PyYaml",
+    "mergedeep",
+    "tomli-w",
+]
+dynamic = [
+    "version",
+]
+
+[project.scripts]
+bootstep = "bootstep:__main__"
+
+[metadata]
+license = "MIT"
+
+
+[tool.setuptools.dynamic.version]
+attr = "bootstep.__version__"
+
+[tool.setuptools.packages.find]
+where = [
+    "src",
+]
+
+
 [tool.mypy]
 python_version = "3.11"
 python_executable = ".venv-check/bin/python"
