@@ -28,3 +28,14 @@ repos:
     - python
     require_serial: true
     verbose: true
+  - id: pytest
+    name: pytest
+    entry: .venv-check/bin/pytest
+    language: script
+    types:
+    - python
+    pass_filenames: false
+    args:
+    - -v
+    - -m
+    - not slow
