@@ -1,0 +1,6 @@
+[tool.mypy]
+python_version = "3.11"
+python_executable = ".venv-check/bin/python"
+strict = true
+files = "*.py"
+mypy_path = "."

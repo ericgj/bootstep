@@ -6,17 +6,17 @@ from mergedeep import merge
 
 """
 from ..util.filesys import (
-    walk_files, 
-    make_dir, 
-    copy_file, 
-    temp_file_name, 
+    walk_files,
+    make_dir,
+    copy_file,
+    temp_file_name,
     make_executable,
     find_glob,
     temp_file_name,
 )
 from ..util.subprocess import run_with_output
 from ..adapter.template import render, render_file
-from ..adapter.merge import merge_file, BackupStrategy
+from ..adapter.merge import merge_file, ConflictStrategy
 """
 
 
@@ -30,17 +30,21 @@ INSTALL_SYS_EXT: dict[str,set[str]] = {
 
 class Installer:
     def __init__(
-        self, 
-        *, 
-        source_dir: str, 
-        backup_strategy: 'BackupStrategy',
-        source_root: str = 'root', 
-        install_script_name: str = 'install',
+        self,
+        *,
+        source_dir: str,
+        conflict_strategy: 'ConflictStrategy',
+        source_root: str = 'root',
+        install_script: str = 'install',
+        post_install_script: str = 'postinstall',
+        run_install_scripts: bool = True,
     ):
         self.source_dir = source_dir
         self.source_root = source_root
-        self.install_script_name = install_script_name
-        self.backup_strategy = backup_strategy
+        self.install_script = install_script
+        self.post_install_script = post_install_script
+        self.conflict_strategy = conflict_strategy
+        self.run_install_scripts = run_install_scripts
 
     @property
     def source_root_dir(self) -> str:
@@ -51,19 +55,23 @@ class Installer:
             'source_dir': self.source_dir,
             'source_root': self.source_root,
             'source_root_dir': self.source_root_dir,
-            'install_script_name': self.install_script_name,
+            'install_script': self.install_script,
+            'post_install_script': self.post_install_script,
+            'run_install_scripts': self.run_install_scripts,
+            'conflict_strategy': self.conflict_strategy.value,
         }
 
-    def install(self, config: dict[str,Any], dest_dir: str = '.'):
+    def install(self, config: dict[str,Any], dest_dir: str = '.') -> None:
         """ Install from pre-rendered config """
         config = cast(
-            dict[str,Any], 
+            dict[str,Any],
             merge({}, config, {'installer': self.to_dict()})
-        )    
+        )
 
-        script = self.find_install_script()
-        if script:
-            render_and_execute_script(script, config, dest_dir)
+        if self.run_install_scripts:
+            script = self.find_install_script()
+            if script:
+                render_and_execute_script(script, config, dest_dir)
 
         for (dir, fname) in walk_files(self.source_root_dir):
             fname_source = os.path.join(dir, fname)
@@ -81,19 +89,35 @@ class Installer:
                     if not os.path.exists(fname_dest):
                         copy_file(fname_tmp, fname_dest)
                     else:
-                        merge_file(fname_dest, fname_tmp, backup_strategy=self.backup_strategy)
+                        merge_file(fname_dest, fname_tmp, conflict_strategy=self.conflict_strategy)
+
+        if self.run_install_scripts:
+            post_script = self.find_post_install_script()
+            if post_script:
+                render_and_execute_script(post_script, config, dest_dir)
+
+
 
     def find_install_script(self) -> str | None:
-        sysname = platform.system()
-        empty_list: list[str] = []
-        try:
-            return next(
-                os.path.join(self.source_dir, fname) 
-                    for fname in find_glob(self.install_script_name + ".*", root_dir=self.source_dir)
-                    if os.path.splitext(fname)[1].lower() in INSTALL_SYS_EXT.get(sysname,empty_list) 
-            )
-        except StopIteration:
-            return None
+        return find_script_by_platform(self.source_dir, self.install_script)
+
+
+    def find_post_install_script(self) -> str | None:
+        return find_script_by_platform(self.source_dir, self.post_install_script)
+
+
+
+def find_script_by_platform(source_dir: str, script_name: str) -> str | None:
+    sysname = platform.system()
+    empty_list: list[str] = []
+    try:
+        return next(
+            os.path.join(source_dir, fname)
+                for fname in find_glob(script_name + ".*", root_dir=source_dir)
+                if os.path.splitext(fname)[1].lower() in INSTALL_SYS_EXT.get(sysname,empty_list)
+        )
+    except StopIteration:
+        return None
 
 
 
@@ -108,14 +132,52 @@ def render_and_execute_script(script_file: str, config: dict[str,Any], cwd: str)
 
 
 # in adapter.template
+from collections.abc import Sequence
 import ustache
+from typing import AnyStr #, Any
 
-render = ustache.render
+def render(template: str, scope: dict[str,Any]) -> str:
+    return ustache.render(template, scope, getter=_safe_render_getter)
+
+class _KEY_MISSING:
+    pass
+
+KEY_MISSING = _KEY_MISSING()
+
+class TemplateKeyError(KeyError):
+    def __init__(self, key: str, source_file: str, dest_file: str):
+        self.key = key
+        self.source_file = source_file
+        self.dest_file = dest_file
+
+    def __str__(self) -> str:
+        return (
+            f"Missing value for '{self.key}' in rendering template "
+            f"{self.source_file} to {self.dest_file}. "
+            "Please check your settings passed to the template."
+        )
+
+def _safe_render_getter(
+    scope: Any,
+    scopes: Sequence[Any],
+    key: AnyStr,
+    default: Any = None,
+    *,
+    virtuals: ustache.VirtualPropertyMapping = ustache.default_virtuals,
+) -> Any:
+    v = ustache.default_getter(scope, scopes, key, default=KEY_MISSING, virtuals=virtuals)
+    if v == KEY_MISSING:
+        raise KeyError(key)
+    return v
+
 
 def render_file(source_file: str, data: dict[str,Any], dest_file: str) -> int:
     with open(source_file,'r') as src, open(dest_file,'w') as dst:
         tmpl = src.read()
-        s = render(tmpl, data).strip()
+        try:
+            s = render(tmpl, data).strip()
+        except KeyError as e:
+            raise TemplateKeyError(e.args[0], source_file, dest_file)
         dst.write(s)
         dst.write('\n')
         return len(s)
@@ -131,6 +193,7 @@ from fnmatch import fnmatch
 import tomllib
 import tomli_w
 from typing import Protocol, TypeVar #, Any, cast
+import yaml
 
 from mergedeep import Strategy #, merge
 
@@ -158,6 +221,45 @@ class TomlMerger:
         with open(fname,'wb') as f:
             tomli_w.dump(d,f)
 
+class YamlMerger:
+    def load(self, fname: str) -> dict[str,Any] | list[Any]:
+        with open(fname,'r') as f:
+            v = yaml.safe_load(f)
+            if isinstance(v,dict):
+                return cast(dict[str,Any],v)
+            elif isinstance(v,list):
+                return v
+            elif v is None:
+                ret: dict[str,Any] = {}
+                return ret
+            else:
+                raise ValueError(
+                    f"YAML value in {fname} is unexpected; "
+                    "it should be a dictionary or a list. "
+                    "check the YAML syntax and try again"
+                )
+
+
+    def merge(
+        self,
+        d0: dict[str,Any] | list[Any],
+        d1: dict[str,Any] | list[Any],
+        strategy: Strategy
+    ) -> dict[str,Any] | list[Any]:
+        if isinstance(d0,dict) and isinstance(d1,dict):
+            return cast(dict[str,Any], merge({}, d0, d1, strategy=strategy))
+        elif isinstance(d0,list) and isinstance(d1,list):
+            return d0 + d1
+        else:
+            raise ValueError(
+                "YAML values are different data types and cannot be merged"
+            )
+
+    def dump(self, d: dict[str,Any] | list[Any], fname: str) -> None:
+        with open(fname,'w') as f:
+            yaml.safe_dump(d,f, sort_keys=False)
+
+
 class TextMerger:
     def load(self, fname: str) -> list[str]:
         lines: list[str] = []
@@ -176,14 +278,16 @@ class TextMerger:
                 f.write("\n")
 
 
-FILETYPE_MERGER: dict[str,FileMerger] = {
+FILETYPE_MERGER: dict[str,FileMerger[Any]] = {
     '.gitignore': TextMerger(),
     '*.toml': TomlMerger(),
+    '*.yml': YamlMerger(),
+    '*.yaml': YamlMerger(),
 }
 
-class BackupStrategy(Enum):
-    ERROR = 0
-    FORCE = 1
+class ConflictStrategy(Enum):
+    ERROR = 'ERROR'
+    FORCE = 'FORCE'
 
 class MergeFileConflict(Exception):
     def __init__(self, dst: str, src: str):
@@ -197,16 +301,16 @@ class MergeFileConflict(Exception):
         )
 
 def merge_file(
-    fname_old: str, 
-    fname_new: str, 
+    fname_old: str,
+    fname_new: str,
     merge_strategy: Strategy = Strategy.TYPESAFE_ADDITIVE,
-    backup_strategy: BackupStrategy = BackupStrategy.ERROR,
-):
+    conflict_strategy: ConflictStrategy = ConflictStrategy.ERROR,
+) -> None:
     try:
-        ftype = next(k for k in FILETYPE_MERGER if fnmatch(k,os.path.basename(fname_old)))
+        ftype = next(k for k in FILETYPE_MERGER if fnmatch(os.path.basename(fname_old),k))
     except StopIteration:
         if os.path.exists(fname_old):
-            _handle_conflict(fname_old, fname_new, backup_strategy)
+            _handle_conflict(fname_old, fname_new, conflict_strategy)
         else:
             copy_file(fname_new, fname_old)
     else:
@@ -216,10 +320,10 @@ def merge_file(
         data_merged = merger.merge(data_old, data_new, strategy=merge_strategy)
         merger.dump(data_merged, fname_old)
 
-def _handle_conflict(fname_old: str, fname_new: str, strategy: BackupStrategy):
-    if strategy == BackupStrategy.ERROR:
+def _handle_conflict(fname_old: str, fname_new: str, strategy: ConflictStrategy) -> None:
+    if strategy == ConflictStrategy.ERROR:
         raise MergeFileConflict(fname_old, fname_new)
-    elif strategy == BackupStrategy.FORCE:
+    elif strategy == ConflictStrategy.FORCE:
         # TODO: log warning
         copy_file(fname_new, fname_old)
 
@@ -338,7 +442,7 @@ def walk_files(dir: str) -> Generator[tuple[str,str],None,None]:
         for f in fs:
             yield (d,f)
 
-def make_dir(dir: str, *, deep: bool = False, **kwargs) -> None:
+def make_dir(dir: str, *, deep: bool = False, **kwargs: Any) -> None:
     if deep is False:
         os.mkdir(dir, **kwargs)
     else:
@@ -356,6 +460,3 @@ def make_executable(fname: str) -> None:
     os.chmod(fname, stat.S_IRUSR | stat.S_IXUSR)
 
 find_glob = glob.iglob
-
-
-
