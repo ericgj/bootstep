@@ -20,23 +20,23 @@ from ..adapter.merge import merge_file, ConflictStrategy
 """
 
 
-
-INSTALL_SYS_EXT: dict[str,set[str]] = {
-    'Windows': {'.cmd','.bat','.ps'},
-    'Linux': {'.sh','.bash',''},
-    'Darwin': {'.sh','.bash',''},
-    'Java': {'.jar'},
+INSTALL_SYS_EXT: dict[str, set[str]] = {
+    "Windows": {".cmd", ".bat", ".ps"},
+    "Linux": {".sh", ".bash", ""},
+    "Darwin": {".sh", ".bash", ""},
+    "Java": {".jar"},
 }
+
 
 class Installer:
     def __init__(
         self,
         *,
         source_dir: str,
-        conflict_strategy: 'ConflictStrategy',
-        source_root: str = 'root',
-        install_script: str = 'install',
-        post_install_script: str = 'postinstall',
+        conflict_strategy: "ConflictStrategy",
+        source_root: str = "root",
+        install_script: str = "install",
+        post_install_script: str = "postinstall",
         run_install_scripts: bool = True,
     ):
         self.source_dir = source_dir
@@ -50,34 +50,33 @@ class Installer:
     def source_root_dir(self) -> str:
         return os.path.join(self.source_dir, self.source_root)
 
-    def to_dict(self) -> dict[str,Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
-            'source_dir': self.source_dir,
-            'source_root': self.source_root,
-            'source_root_dir': self.source_root_dir,
-            'install_script': self.install_script,
-            'post_install_script': self.post_install_script,
-            'run_install_scripts': self.run_install_scripts,
-            'conflict_strategy': self.conflict_strategy.value,
+            "source_dir": self.source_dir,
+            "source_root": self.source_root,
+            "source_root_dir": self.source_root_dir,
+            "install_script": self.install_script,
+            "post_install_script": self.post_install_script,
+            "run_install_scripts": self.run_install_scripts,
+            "conflict_strategy": self.conflict_strategy.value,
         }
 
-    def install(self, config: dict[str,Any], dest_dir: str = '.') -> None:
-        """ Install from pre-rendered config """
-        config = cast(
-            dict[str,Any],
-            merge({}, config, {'installer': self.to_dict()})
-        )
+    def install(self, config: dict[str, Any], dest_dir: str = ".") -> None:
+        """Install from pre-rendered config"""
+        config = cast(dict[str, Any], merge({}, config, {"installer": self.to_dict()}))
 
         if self.run_install_scripts:
             script = self.find_install_script()
             if script:
                 render_and_execute_script(script, config, dest_dir)
 
-        for (dir, fname) in walk_files(self.source_root_dir):
+        for dir, fname in walk_files(self.source_root_dir):
             fname_source = os.path.join(dir, fname)
             dir_rendered = render(dir, config)
             fname_rendered = render(fname, config)
-            fname_dest_dir = os.path.join(dest_dir, os.path.relpath(dir_rendered,self.source_root_dir))
+            fname_dest_dir = os.path.join(
+                dest_dir, os.path.relpath(dir_rendered, self.source_root_dir)
+            )
             fname_dest = os.path.join(fname_dest_dir, fname_rendered)
             with temp_file_name(os.path.basename(fname_rendered)) as fname_tmp:
                 size = render_file(fname_source, config, fname_tmp)
@@ -89,22 +88,22 @@ class Installer:
                     if not os.path.exists(fname_dest):
                         copy_file(fname_tmp, fname_dest)
                     else:
-                        merge_file(fname_dest, fname_tmp, conflict_strategy=self.conflict_strategy)
+                        merge_file(
+                            fname_dest,
+                            fname_tmp,
+                            conflict_strategy=self.conflict_strategy,
+                        )
 
         if self.run_install_scripts:
             post_script = self.find_post_install_script()
             if post_script:
                 render_and_execute_script(post_script, config, dest_dir)
 
-
-
     def find_install_script(self) -> str | None:
         return find_script_by_platform(self.source_dir, self.install_script)
 
-
     def find_post_install_script(self) -> str | None:
         return find_script_by_platform(self.source_dir, self.post_install_script)
-
 
 
 def find_script_by_platform(source_dir: str, script_name: str) -> str | None:
@@ -113,36 +112,39 @@ def find_script_by_platform(source_dir: str, script_name: str) -> str | None:
     try:
         return next(
             os.path.join(source_dir, fname)
-                for fname in find_glob(script_name + ".*", root_dir=source_dir)
-                if os.path.splitext(fname)[1].lower() in INSTALL_SYS_EXT.get(sysname,empty_list)
+            for fname in find_glob(script_name + ".*", root_dir=source_dir)
+            if os.path.splitext(fname)[1].lower()
+            in INSTALL_SYS_EXT.get(sysname, empty_list)
         )
     except StopIteration:
         return None
 
 
-
-def render_and_execute_script(script_file: str, config: dict[str,Any], cwd: str) -> None:
+def render_and_execute_script(
+    script_file: str, config: dict[str, Any], cwd: str
+) -> None:
     with temp_file_name(os.path.basename(script_file)) as tmp_file:
         render_file(script_file, config, tmp_file)
         make_executable(tmp_file)
         run_with_output([tmp_file], cwd=cwd)
 
 
-
-
-
 # in adapter.template
 from collections.abc import Sequence
 import ustache
-from typing import AnyStr #, Any
+from typing import AnyStr  # , Any
 
-def render(template: str, scope: dict[str,Any]) -> str:
+
+def render(template: str, scope: dict[str, Any]) -> str:
     return ustache.render(template, scope, getter=_safe_render_getter)
+
 
 class _KEY_MISSING:
     pass
 
+
 KEY_MISSING = _KEY_MISSING()
+
 
 class TemplateKeyError(KeyError):
     def __init__(self, key: str, source_file: str, dest_file: str):
@@ -157,6 +159,7 @@ class TemplateKeyError(KeyError):
             "Please check your settings passed to the template."
         )
 
+
 def _safe_render_getter(
     scope: Any,
     scopes: Sequence[Any],
@@ -165,40 +168,43 @@ def _safe_render_getter(
     *,
     virtuals: ustache.VirtualPropertyMapping = ustache.default_virtuals,
 ) -> Any:
-    v = ustache.default_getter(scope, scopes, key, default=KEY_MISSING, virtuals=virtuals)
+    v = ustache.default_getter(
+        scope, scopes, key, default=KEY_MISSING, virtuals=virtuals
+    )
     if v == KEY_MISSING:
         raise KeyError(key)
     return v
 
 
-def render_file(source_file: str, data: dict[str,Any], dest_file: str) -> int:
-    with open(source_file,'r') as src, open(dest_file,'w') as dst:
+def render_file(source_file: str, data: dict[str, Any], dest_file: str) -> int:
+    with open(source_file, "r") as src, open(dest_file, "w") as dst:
         tmpl = src.read()
         try:
             s = render(tmpl, data).strip()
         except KeyError as e:
             raise TemplateKeyError(e.args[0], source_file, dest_file)
         dst.write(s)
-        dst.write('\n')
+        dst.write("\n")
         return len(s)
-
-
 
 
 # in adapter.merge
 
 from enum import Enum
 from fnmatch import fnmatch
+
 # import os.path
 import tomllib
 import tomli_w
-from typing import Protocol, TypeVar #, Any, cast
+from typing import Protocol, TypeVar  # , Any, cast
 import yaml
 
-from mergedeep import Strategy #, merge
+from mergedeep import Strategy  # , merge
 
 
-A = TypeVar('A')
+A = TypeVar("A")
+
+
 class FileMerger(Protocol[A]):
     def load(self, fname: str) -> A:
         pass
@@ -209,28 +215,32 @@ class FileMerger(Protocol[A]):
     def dump(self, a: A, fname: str) -> None:
         pass
 
+
 class TomlMerger:
-    def load(self, fname: str) -> dict[str,Any]:
-        with open(fname,'rb') as f:
+    def load(self, fname: str) -> dict[str, Any]:
+        with open(fname, "rb") as f:
             return tomllib.load(f)
 
-    def merge(self, d0: dict[str,Any], d1: dict[str,Any], strategy: Strategy) -> dict[str,Any]:
-        return cast(dict[str,Any], merge({}, d0, d1, strategy=strategy))
+    def merge(
+        self, d0: dict[str, Any], d1: dict[str, Any], strategy: Strategy
+    ) -> dict[str, Any]:
+        return cast(dict[str, Any], merge({}, d0, d1, strategy=strategy))
 
-    def dump(self, d: dict[str,Any], fname: str) -> None:
-        with open(fname,'wb') as f:
-            tomli_w.dump(d,f)
+    def dump(self, d: dict[str, Any], fname: str) -> None:
+        with open(fname, "wb") as f:
+            tomli_w.dump(d, f)
+
 
 class YamlMerger:
-    def load(self, fname: str) -> dict[str,Any] | list[Any]:
-        with open(fname,'r') as f:
+    def load(self, fname: str) -> dict[str, Any] | list[Any]:
+        with open(fname, "r") as f:
             v = yaml.safe_load(f)
-            if isinstance(v,dict):
-                return cast(dict[str,Any],v)
-            elif isinstance(v,list):
+            if isinstance(v, dict):
+                return cast(dict[str, Any], v)
+            elif isinstance(v, list):
                 return v
             elif v is None:
-                ret: dict[str,Any] = {}
+                ret: dict[str, Any] = {}
                 return ret
             else:
                 raise ValueError(
@@ -239,55 +249,56 @@ class YamlMerger:
                     "check the YAML syntax and try again"
                 )
 
-
     def merge(
         self,
-        d0: dict[str,Any] | list[Any],
-        d1: dict[str,Any] | list[Any],
-        strategy: Strategy
-    ) -> dict[str,Any] | list[Any]:
-        if isinstance(d0,dict) and isinstance(d1,dict):
-            return cast(dict[str,Any], merge({}, d0, d1, strategy=strategy))
-        elif isinstance(d0,list) and isinstance(d1,list):
+        d0: dict[str, Any] | list[Any],
+        d1: dict[str, Any] | list[Any],
+        strategy: Strategy,
+    ) -> dict[str, Any] | list[Any]:
+        if isinstance(d0, dict) and isinstance(d1, dict):
+            return cast(dict[str, Any], merge({}, d0, d1, strategy=strategy))
+        elif isinstance(d0, list) and isinstance(d1, list):
             return d0 + d1
         else:
             raise ValueError(
                 "YAML values are different data types and cannot be merged"
             )
 
-    def dump(self, d: dict[str,Any] | list[Any], fname: str) -> None:
-        with open(fname,'w') as f:
-            yaml.safe_dump(d,f, sort_keys=False)
+    def dump(self, d: dict[str, Any] | list[Any], fname: str) -> None:
+        with open(fname, "w") as f:
+            yaml.safe_dump(d, f, sort_keys=False)
 
 
 class TextMerger:
     def load(self, fname: str) -> list[str]:
         lines: list[str] = []
-        with open(fname,'r') as f:
-            while (line := f.readline()):
+        with open(fname, "r") as f:
+            while line := f.readline():
                 lines.append(line.rstrip())
         return lines
 
     def merge(self, l0: list[str], l1: list[str], strategy: Strategy) -> list[str]:
-        return l0 + [''] + l1   # blank line between
+        return l0 + [""] + l1  # blank line between
 
     def dump(self, lines: list[str], fname: str) -> None:
-        with open(fname,'w') as f:
+        with open(fname, "w") as f:
             for line in lines:
                 f.write(line)
                 f.write("\n")
 
 
-FILETYPE_MERGER: dict[str,FileMerger[Any]] = {
-    '.gitignore': TextMerger(),
-    '*.toml': TomlMerger(),
-    '*.yml': YamlMerger(),
-    '*.yaml': YamlMerger(),
+FILETYPE_MERGER: dict[str, FileMerger[Any]] = {
+    ".gitignore": TextMerger(),
+    "*.toml": TomlMerger(),
+    "*.yml": YamlMerger(),
+    "*.yaml": YamlMerger(),
 }
 
+
 class ConflictStrategy(Enum):
-    ERROR = 'ERROR'
-    FORCE = 'FORCE'
+    ERROR = "ERROR"
+    FORCE = "FORCE"
+
 
 class MergeFileConflict(Exception):
     def __init__(self, dst: str, src: str):
@@ -300,6 +311,7 @@ class MergeFileConflict(Exception):
             "and destination file already exists"
         )
 
+
 def merge_file(
     fname_old: str,
     fname_new: str,
@@ -307,7 +319,9 @@ def merge_file(
     conflict_strategy: ConflictStrategy = ConflictStrategy.ERROR,
 ) -> None:
     try:
-        ftype = next(k for k in FILETYPE_MERGER if fnmatch(os.path.basename(fname_old),k))
+        ftype = next(
+            k for k in FILETYPE_MERGER if fnmatch(os.path.basename(fname_old), k)
+        )
     except StopIteration:
         if os.path.exists(fname_old):
             _handle_conflict(fname_old, fname_new, conflict_strategy)
@@ -320,7 +334,10 @@ def merge_file(
         data_merged = merger.merge(data_old, data_new, strategy=merge_strategy)
         merger.dump(data_merged, fname_old)
 
-def _handle_conflict(fname_old: str, fname_new: str, strategy: ConflictStrategy) -> None:
+
+def _handle_conflict(
+    fname_old: str, fname_new: str, strategy: ConflictStrategy
+) -> None:
     if strategy == ConflictStrategy.ERROR:
         raise MergeFileConflict(fname_old, fname_new)
     elif strategy == ConflictStrategy.FORCE:
@@ -328,16 +345,17 @@ def _handle_conflict(fname_old: str, fname_new: str, strategy: ConflictStrategy)
         copy_file(fname_new, fname_old)
 
 
-
 # in util.subprocess
 import contextlib
+
 # import logging
 from subprocess import Popen, PIPE
-from typing import Callable, Sequence # , Any
+from typing import Callable, Sequence  # , Any
 
 # Note: stolen from pre-commit
 
 # logger = logging.getLogger(__name__)
+
 
 class CalledProcessError(RuntimeError):
     def __init__(
@@ -431,16 +449,19 @@ def force_bytes(exc: Any) -> bytes:
 from contextlib import contextmanager
 import glob
 import os
+
 # import os.path
 import shutil
 import stat
 from tempfile import TemporaryDirectory
 from typing import Generator
 
-def walk_files(dir: str) -> Generator[tuple[str,str],None,None]:
-    for (d,_,fs) in os.walk(dir):
+
+def walk_files(dir: str) -> Generator[tuple[str, str], None, None]:
+    for d, _, fs in os.walk(dir):
         for f in fs:
-            yield (d,f)
+            yield (d, f)
+
 
 def make_dir(dir: str, *, deep: bool = False, **kwargs: Any) -> None:
     if deep is False:
@@ -448,15 +469,18 @@ def make_dir(dir: str, *, deep: bool = False, **kwargs: Any) -> None:
     else:
         os.makedirs(dir, **kwargs)
 
+
 copy_file = shutil.copyfile
 
 
 @contextmanager
-def temp_file_name(fname: str) -> Generator[str,None,None]:
-   with TemporaryDirectory() as tmpdir:
-       yield os.path.join(tmpdir, fname)
+def temp_file_name(fname: str) -> Generator[str, None, None]:
+    with TemporaryDirectory() as tmpdir:
+        yield os.path.join(tmpdir, fname)
+
 
 def make_executable(fname: str) -> None:
     os.chmod(fname, stat.S_IRUSR | stat.S_IXUSR)
+
 
 find_glob = glob.iglob
