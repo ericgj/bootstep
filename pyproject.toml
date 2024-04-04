@@ -30,7 +30,7 @@ dynamic = [
 ]
 
 [project.scripts]
-bootstep = "bootstep:__main__"
+bootstep = "bootstep:__main__.main"
 
 [metadata]
 license = "MIT"
@@ -49,7 +49,7 @@ where = [
 python_version = "3.11"
 python_executable = ".venv-check/bin/python"
 strict = true
-files = "*.py"
+files = "test/*.py"
 mypy_path = "."
 
 [tool.pytest.ini_options]

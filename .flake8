@@ -1,7 +1,7 @@
 [flake8]
 max-complexity = 20
 max-line-length = 88
-select = E4,E7,E9,F
+select = C9,E4,E7,E9,F,W6
 exclude =
     .bzr,
     .direnv,
@@ -29,4 +29,5 @@ exclude =
     node_modules,
     site-packages,
     venv,
-    .venv-check
+    .venv-check,
+    scratch

@@ -8,6 +8,8 @@ from typing import Callable, Sequence, Any
 
 logger = logging.getLogger(__name__)
 
+LOGINFO = {"component_name": __name__}
+
 
 class CalledProcessError(RuntimeError):
     def __init__(
@@ -51,7 +53,7 @@ def run_with_binary_output(
 ) -> tuple[int, bytes | None, bytes | None]:
     _setdefault_kwargs(kwargs)
     try:
-        logger.debug(f"Running command: {cmd}")
+        logger.debug(f"Running command: {cmd}", extra=LOGINFO)
         proc = Popen(cmd, **kwargs)
     except OSError as e:
         returncode, stdout_b, stderr_b = _oserror_to_output(e)
@@ -66,7 +68,7 @@ def run_with_binary_output(
         if check(returncode):
             raise CalledProcessError(returncode, cmd, stdout_b, stderr_b)
 
-    logger.debug(f"Ran command: {cmd}, returncode = {returncode}")
+    logger.debug(f"Ran command: {cmd}, returncode = {returncode}", extra=LOGINFO)
     return (returncode, stdout_b, stderr_b)
 
 

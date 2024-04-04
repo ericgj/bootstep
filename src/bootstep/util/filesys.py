@@ -4,6 +4,7 @@ import os
 import os.path
 import shutil
 import stat
+import sys
 from tempfile import TemporaryDirectory
 from typing import Generator, Any
 
@@ -35,3 +36,16 @@ def make_executable(fname: str) -> None:
 
 
 find_glob = glob.iglob
+
+
+def user_data_dir() -> str:
+    home = os.path.expanduser("~")
+    p = sys.platform
+    if p == "win32":
+        return os.path.join(home, "AppData", "Roaming")
+    elif p == "linux":
+        return os.path.join(home, ".local", "share")
+    elif p == "darwin":
+        return os.path.join(home, "Library", "Application Support")
+    else:
+        return home

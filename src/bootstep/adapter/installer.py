@@ -1,3 +1,4 @@
+import logging
 import os.path
 import platform
 from typing import Any
@@ -13,6 +14,7 @@ from ..util.subprocess import run_with_output
 from ..adapter.template import render, render_file
 from ..adapter.merge import merge_file, ConflictStrategy
 
+logger = logging.getLogger(__name__)
 
 INSTALL_SYS_EXT: dict[str, list[str]] = {
     "Windows": [".cmd", ".bat", ".ps", ".py"],
@@ -25,8 +27,8 @@ INSTALL_SYS_EXT: dict[str, list[str]] = {
 class Installer:
     def __init__(
         self,
-        *,
         source_dir: str,
+        *,
         conflict_strategy: ConflictStrategy,
         source_root: str = "root",
         install_script: str = "install",
@@ -46,6 +48,7 @@ class Installer:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "component_name": os.path.basename(self.source_dir),
             "source_dir": self.source_dir,
             "source_root": self.source_root,
             "source_root_dir": self.source_root_dir,
@@ -62,11 +65,21 @@ class Installer:
         """Install from pre-rendered config"""
         meta = self.meta()
         scopes = [meta]
+        loginfo = meta["__install__"]
+
+        logger.info(f"Installing from {self.source_dir} -> {dest_dir}", extra=loginfo)
 
         if self.run_install_scripts:
             script = self.find_install_script()
             if script:
+                logger.info(
+                    f"Running install script {os.path.basename(script)}", extra=loginfo
+                )
                 render_and_execute_script(script, config, dest_dir, scopes=scopes)
+            else:
+                logger.warning("No install script found", extra=loginfo)
+        else:
+            logger.info("Skipping install script", extra=loginfo)
 
         for dir, fname in walk_files(self.source_root_dir):
             fname_source = os.path.join(dir, fname)
@@ -76,6 +89,11 @@ class Installer:
                 dest_dir, os.path.relpath(dir_rendered, self.source_root_dir)
             )
             fname_dest = os.path.join(fname_dest_dir, fname_rendered)
+
+            logger.info(
+                f"Configuring {os.path.relpath(fname_dest, dest_dir)}", extra=loginfo
+            )
+
             with temp_file_name(os.path.basename(fname_rendered)) as fname_tmp:
                 size = render_file(fname_source, config, fname_tmp, scopes=scopes)
                 if size == 0:
@@ -84,8 +102,16 @@ class Installer:
                     if not os.path.exists(fname_dest_dir):
                         make_dir(fname_dest_dir, deep=True)
                     if not os.path.exists(fname_dest):
+                        logger.info(
+                            f"Copying to {os.path.relpath(fname_dest, dest_dir)}",
+                            extra=loginfo,
+                        )
                         copy_file(fname_tmp, fname_dest)
                     else:
+                        logger.info(
+                            f"Merging with {os.path.relpath(fname_dest, dest_dir)}",
+                            extra=loginfo,
+                        )
                         merge_file(
                             fname_dest,
                             fname_tmp,
@@ -95,7 +121,17 @@ class Installer:
         if self.run_install_scripts:
             post_script = self.find_post_install_script()
             if post_script:
+                logger.info(
+                    f"Running post-install script {os.path.basename(post_script)}",
+                    extra=loginfo,
+                )
                 render_and_execute_script(post_script, config, dest_dir, scopes=scopes)
+            else:
+                logger.info("No post-install script found", extra=loginfo)
+        else:
+            logger.info("Skipping post-install script", extra=loginfo)
+
+        logger.info(f"Installed from {self.source_dir} -> {dest_dir}", extra=loginfo)
 
     def find_install_script(self) -> str | None:
         return find_script_by_platform(self.source_dir, self.install_script)
