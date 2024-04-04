@@ -8,17 +8,10 @@ import sys
 import tomllib
 from typing import Any
 
-from .util.filesys import user_data_dir, make_dir
+from .util.logging import user_log_file, config_logging
 
 
-def user_log_file(make: bool = False) -> str:
-    dir = os.path.join(user_data_dir(), "bootstep")
-    if make:
-        make_dir(dir, deep=True, exist_ok=True)
-    return os.path.join(dir, "bootstep.log")
-
-
-logging.config.dictConfig(
+config_logging(
     {
         "version": 1,
         "formatters": {
@@ -39,7 +32,7 @@ logging.config.dictConfig(
                 "class": "logging.handlers.RotatingFileHandler",
                 "formatter": "full",
                 "level": "DEBUG",
-                "filename": user_log_file(True),
+                "filename": user_log_file("bootstep", True),
                 "maxBytes": 2**20,
                 "backupCount": 10,
             },
@@ -52,13 +45,17 @@ logging.config.dictConfig(
 
 logger = logging.getLogger()
 
+# Imports post logging init
+
 from .adapter.installer import Installer  # noqa
 from .adapter.merge import ConflictStrategy  # noqa
+from .adapter.rollback import rollback_on_error  # noqa
 
 
 @dataclass
 class Arguments:
     installers: list[str]
+    rollback: bool
     installers_dir: str | None = None
     params_file: str | None = None
 
@@ -81,6 +78,18 @@ def main(args: list[str] = sys.argv[1:]) -> None:
         metavar="DIR",
         help="Directory under which to find installer path(s)",
     )
+    cmd.add_argument(
+        "--rollback",
+        action="store_true",
+        help="Rollback changes on error (git stash + git clean)",
+    )
+    cmd.add_argument(
+        "--no-rollback",
+        dest="rollback",
+        action="store_false",
+        help="Do not rollback changes on error",
+    )
+    cmd.set_defaults(rollback=True)
 
     parsed = cmd.parse_args(args, namespace=Arguments)
 
@@ -100,17 +109,31 @@ def main(args: list[str] = sys.argv[1:]) -> None:
         else:
             installers = parsed.installers
 
-        process_installers(installers, parsed.installers_dir, params)
+        process_installers(
+            installers, parsed.installers_dir, params, rollback=parsed.rollback
+        )
 
     except Exception as e:
+        loginfo["component_name"] = (
+            getattr(e, "component_name", loginfo["component_name"]) + ":error"
+        )
         logger.exception(e, extra=loginfo)
-        log_file = user_log_file()
-        print(f"See {log_file} for details.\n", file=sys.stderr)
+        log_file = user_log_file("bootstep")
+        if parsed.rollback:
+            print(
+                "Note: any changes made by installers have been rolled back.",
+                file=sys.stderr,
+            )
+        print(f"See {log_file} for details.", file=sys.stderr)
         sys.exit(1)
 
 
 def process_installers(
-    installers: list[str], installers_dir: str | None, params: dict[str, Any]
+    installers: list[str],
+    installers_dir: str | None,
+    params: dict[str, Any],
+    *,
+    rollback: bool,
 ) -> None:
     for inst in installers:
         source_dir: str
@@ -131,7 +154,12 @@ def process_installers(
             conflict_strategy=ConflictStrategy.ERROR,
             run_install_scripts=meta_i.get("run_install_scripts", True),
         )
-        installer.install(params_i)
+
+        if rollback:
+            with rollback_on_error(key):
+                installer.install(params_i)
+        else:
+            installer.install(params_i)
 
 
 def load_params_file(fname: str) -> dict[str, Any]:

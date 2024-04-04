@@ -11,15 +11,18 @@ KEY_MISSING = _KEY_MISSING()
 
 
 class TemplateKeyError(KeyError):
-    def __init__(self, key: str, source_file: str, dest_file: str):
+    def __init__(
+        self, key: str, *, component_name: str, source_file: str, dest_file: str
+    ):
         self.key = key
+        self.component_name = component_name
         self.source_file = source_file
         self.dest_file = dest_file
 
     def __str__(self) -> str:
         return (
             f"Missing value for '{self.key}' in rendering template "
-            f"{self.source_file} to {self.dest_file}. "
+            f"{self.source_file} to {self.dest_file} ({self.component_name}). "
             "Please check your settings passed to the template."
         )
 
@@ -59,6 +62,7 @@ def render_file(
     scope: Any,
     dest_file: str,
     *,
+    component_name: str,
     scopes: Iterable[Any] = [],
 ) -> int:
     with open(source_file, "r") as src, open(dest_file, "w") as dst:
@@ -66,7 +70,12 @@ def render_file(
         try:
             s = render(tmpl, scope, scopes=scopes).strip()
         except KeyError as e:
-            raise TemplateKeyError(e.args[0], source_file, dest_file)
+            raise TemplateKeyError(
+                e.args[0],
+                component_name=component_name,
+                source_file=source_file,
+                dest_file=dest_file,
+            )
         dst.write(s)
         dst.write("\n")
         return len(s)

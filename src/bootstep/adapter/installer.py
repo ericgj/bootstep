@@ -46,9 +46,13 @@ class Installer:
     def source_root_dir(self) -> str:
         return os.path.join(self.source_dir, self.source_root)
 
+    @property
+    def component_name(self) -> str:
+        return os.path.basename(self.source_dir)
+
     def to_dict(self) -> dict[str, Any]:
         return {
-            "component_name": os.path.basename(self.source_dir),
+            "component_name": self.component_name,
             "source_dir": self.source_dir,
             "source_root": self.source_root,
             "source_root_dir": self.source_root_dir,
@@ -65,7 +69,8 @@ class Installer:
         """Install from pre-rendered config"""
         meta = self.meta()
         scopes = [meta]
-        loginfo = meta["__install__"]
+        component_name = self.component_name
+        loginfo = {"component_name": component_name}
 
         logger.info(f"Installing from {self.source_dir} -> {dest_dir}", extra=loginfo)
 
@@ -75,7 +80,13 @@ class Installer:
                 logger.info(
                     f"Running install script {os.path.basename(script)}", extra=loginfo
                 )
-                render_and_execute_script(script, config, dest_dir, scopes=scopes)
+                render_and_execute_script(
+                    script,
+                    config,
+                    dest_dir,
+                    component_name=component_name,
+                    scopes=scopes,
+                )
             else:
                 logger.warning("No install script found", extra=loginfo)
         else:
@@ -95,7 +106,13 @@ class Installer:
             )
 
             with temp_file_name(os.path.basename(fname_rendered)) as fname_tmp:
-                size = render_file(fname_source, config, fname_tmp, scopes=scopes)
+                size = render_file(
+                    fname_source,
+                    config,
+                    fname_tmp,
+                    component_name=component_name,
+                    scopes=scopes,
+                )
                 if size == 0:
                     continue  # TODO log skipping file
                 else:
@@ -125,7 +142,13 @@ class Installer:
                     f"Running post-install script {os.path.basename(post_script)}",
                     extra=loginfo,
                 )
-                render_and_execute_script(post_script, config, dest_dir, scopes=scopes)
+                render_and_execute_script(
+                    post_script,
+                    config,
+                    dest_dir,
+                    component_name=component_name,
+                    scopes=scopes,
+                )
             else:
                 logger.info("No post-install script found", extra=loginfo)
         else:
@@ -157,11 +180,14 @@ def render_and_execute_script(
     config: dict[str, Any],
     cwd: str,
     *,
+    component_name: str,
     scopes: list[dict[str, Any]] = [],
 ) -> None:
     ext = os.path.splitext(script_file)[1]
     with temp_file_name(os.path.basename(script_file)) as tmp_file:
-        render_file(script_file, config, tmp_file, scopes=scopes)
+        render_file(
+            script_file, config, tmp_file, component_name=component_name, scopes=scopes
+        )
         if ext == ".py":
             run_with_output(["python", tmp_file], cwd=cwd)
         else:
