@@ -23,7 +23,7 @@ def rollback_on_error(
 ) -> Generator[None, None, None]:
     push_cmd = ["git", "stash", "push", "--include-untracked"]
     pop_cmd = ["git", "stash", "pop"]
-    drop_cmd = ["git", "stash", "drop"]
+    # drop_cmd = ["git", "stash", "drop"]
     clean_cmd = ["git", "clean", "-f", "-d"]
 
     loginfo = {"component_name": f"{component_name}:rollback"}
@@ -36,7 +36,7 @@ def rollback_on_error(
     if has_changes:
         logger.debug(f"Adding any untracked files to index: {dir}", extra=loginfo)
         add_untracked_in(dir)
-        logger.debug(f"Stashing current state: {dir}", extra=loginfo)
+        logger.info(f"Stashing current state: {dir}", extra=loginfo)
         run_with_output(push_cmd, cwd=dir)
 
     try:
@@ -46,17 +46,13 @@ def rollback_on_error(
         logger.warning(f"Rolling back changes in {dir}", extra=loginfo)
         run_with_output(clean_cmd, cwd=dir)
 
-        if has_changes:
-            logger.warning(f"Restoring previous stashed state: {dir}", extra=loginfo)
-            run_with_output(pop_cmd, cwd=dir)
-
         if fail:
             raise e
 
-    else:
+    finally:
         if has_changes:
-            logger.debug(f"Dropping previous stashed state: {dir}", extra=loginfo)
-            run_with_output(drop_cmd, cwd=dir)
+            logger.info(f"Restoring previously stashed state: {dir}", extra=loginfo)
+            run_with_output(pop_cmd, cwd=dir)
 
 
 def is_inside_repo(dir: str) -> bool:

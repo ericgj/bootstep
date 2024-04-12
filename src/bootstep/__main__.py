@@ -109,9 +109,11 @@ def main(args: list[str] = sys.argv[1:]) -> None:
         else:
             installers = parsed.installers
 
-        process_installers(
-            installers, parsed.installers_dir, params, rollback=parsed.rollback
-        )
+        if parsed.rollback:
+            with rollback_on_error("main"):
+                process_installers(installers, parsed.installers_dir, params)
+        else:
+            process_installers(installers, parsed.installers_dir, params)
 
     except Exception as e:
         loginfo["component_name"] = (
@@ -132,8 +134,6 @@ def process_installers(
     installers: list[str],
     installers_dir: str | None,
     params: dict[str, Any],
-    *,
-    rollback: bool,
 ) -> None:
     for inst in installers:
         source_dir: str
@@ -155,11 +155,7 @@ def process_installers(
             run_install_scripts=meta_i.get("run_install_scripts", True),
         )
 
-        if rollback:
-            with rollback_on_error(key):
-                installer.install(params_i)
-        else:
-            installer.install(params_i)
+        installer.install(params_i)
 
 
 def load_params_file(fname: str) -> dict[str, Any]:
